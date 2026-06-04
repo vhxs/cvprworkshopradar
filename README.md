@@ -56,6 +56,44 @@ CVPR Workshop Radar helps you move from “what is happening?” to “what shou
 - 🗺️ **Venue map support**  
   Open room maps for supported locations.
 
+## 🖥️ Running Locally
+
+The app is a static single-page application. You need a local HTTP server (not `file://`) for the service worker to function correctly.
+
+**1. Install dependencies**
+
+```bash
+pip install requests beautifulsoup4
+```
+
+**2. Install Ollama** (required for semantic search)
+
+```bash
+# macOS / Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# macOS via Homebrew
+brew install ollama
+```
+
+**3. Build the semantic search index** (one-time, ~2 min)
+
+```bash
+ollama serve &          # start Ollama in the background
+ollama pull nomic-embed-text
+python3 build_search_index.py
+```
+
+**4. Serve the app**
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open `http://localhost:8000` in your browser.
+
+To use semantic search, make sure `ollama serve` is running, then click the **Aa** button next to the search box to switch modes.
+
 ## 🧭 Why This Exists
 
 Workshop and tutorial days are often where some of the most interesting conversations happen: emerging topics, focused communities, niche challenges, early ideas, and practical sessions that do not always stand out in a giant program.

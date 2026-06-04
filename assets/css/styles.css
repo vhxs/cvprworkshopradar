@@ -1697,3 +1697,5 @@ html.dark-mode .tl-tooltip-type--poster       { --tl-block-bg:#003033; --tl-bloc
 html.dark-mode .tl-tooltip-type--break        { --tl-block-bg:#1e2a30; --tl-block-text:#90a4ae; --tl-block-border:#546e7a; }
 html.dark-mode .tl-tooltip-type--housekeeping { --tl-block-bg:#3e2000; --tl-block-text:#ffcc80; --tl-block-border:#ffa726; }
 html.dark-mode .tl-tooltip-type--none         { --tl-block-bg:#1a1d2e; --tl-block-text:#6b7280; --tl-block-border:#374151; }
+
+/* ── Semantic search ─────────────────────────────────────── */

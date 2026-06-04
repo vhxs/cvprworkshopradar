@@ -99,11 +99,71 @@ let _modalHiddenTypes = new Set();
 const STORE           = 'cvpr2026_saved';
 const TL_FILTER_STORE = 'cvpr2026_tl_filter';
 
+// ─── Search mode state ────────────────────────────────────────────────────────
+let searchMode        = 'keyword'; // 'keyword' | 'semantic' | 'smart'
+let searchEmbeddings  = null;   // Map<id, Float32Array> loaded from search_index.json
+let queryEmbedding    = null;   // Float32Array for the current query
+let semanticDebounce  = null;
+const OLLAMA_EMBED_URL = 'http://localhost:11434/api/embeddings';
+const EMBED_MODEL      = 'nomic-embed-text';
+
 // ─── Persistence ──────────────────────────────────────────────────────────────
 function loadSaved()  { try { saved = new Set(JSON.parse(localStorage.getItem(STORE) || '[]')); } catch { saved = new Set(); } }
 function storeSaved() { localStorage.setItem(STORE, JSON.stringify([...saved])); }
 function loadTlFilter()  { try { tlHiddenTypes = new Set(JSON.parse(localStorage.getItem(TL_FILTER_STORE) || '[]')); } catch { tlHiddenTypes = new Set(); } }
 function storeTlFilter() { localStorage.setItem(TL_FILTER_STORE, JSON.stringify([...tlHiddenTypes])); }
+
+// ─── Semantic search helpers ──────────────────────────────────────────────────
+function cosineSim(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+async function loadSearchIndex() {
+  try {
+    const res = await fetch('search_index.json', { cache: 'no-cache' });
+    if (!res.ok) return;
+    const arr = await res.json();
+    searchEmbeddings = new Map(arr.map(({ id, embedding }) => [id, new Float32Array(embedding)]));
+  } catch {
+    // Index not built yet — semantic mode unavailable
+  }
+}
+
+async function embedQuery(text) {
+  const res = await fetch(OLLAMA_EMBED_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
+  });
+  if (!res.ok) throw new Error(`Ollama ${res.status}`);
+  const data = await res.json();
+  return new Float32Array(data.embedding);
+}
+
+
+function setSearchMode(mode) {
+  if (mode !== 'keyword' && !searchEmbeddings) mode = 'keyword';
+  searchMode = mode;
+  queryEmbedding = null;
+  const sel = document.getElementById('search-mode-select');
+  if (sel) sel.value = mode;
+  renderBrowse();
+}
+
+function triggerSemanticSearch(query) {
+  clearTimeout(semanticDebounce);
+  if (!query.trim()) { queryEmbedding = null; renderBrowse(); return; }
+  semanticDebounce = setTimeout(async () => {
+    try {
+      queryEmbedding = await embedQuery(query);
+    } catch {
+      queryEmbedding = null;
+    }
+    renderBrowse();
+  }, 500);
+}
 
 // ─── Normalise time slot ───────────────────────────────────────────────────────
 function slot(raw) {
@@ -132,6 +192,7 @@ try { roomCoords = await coordsRes.json(); } catch { /* ignore */ }
   const ws = (data.workshops || []).map((e, i) => ({ ...e, id: `w${i}`, type: e.type || 'Workshop', _slot: slot(e.time_slot) }));
   const ts = (data.tutorials  || []).map((e, i) => ({ ...e, id: `t${i}`, type: e.type || 'Tutorial', _slot: slot(e.time_slot) }));
   allEvents = [...ws, ...ts];
+  loadSearchIndex();
 
   document.getElementById('pill-workshops').textContent = `${ws.length} workshops`;
   document.getElementById('pill-tutorials').textContent  = `${ts.length} tutorials`;
@@ -158,19 +219,61 @@ function getFiltered() {
   const fTrack   = document.getElementById('f-track').value;
   const fProgram = document.getElementById('f-program').value;
 
-  return allEvents.filter(e => {
-if (fDate    && e.date   !== fDate)  return false;
-if (fTime    && e._slot  !== fTime)  return false;
-if (fType    && e.type   !== fType)  return false;
-if (fTrack   && e.track  !== fTrack) return false;
-if (fProgram === 'yes' && !e.program_found) return false;
-if (fProgram === 'no'  &&  e.program_found) return false;
-if (search) {
-  const hay = `${e.title} ${e.organizers||''} ${e.summary||''} ${e.program_text||''}`.toLowerCase();
-  if (!hay.includes(search)) return false;
-}
-return true;
+  // Apply dropdown filters
+  const pool = allEvents.filter(e => {
+    if (fDate    && e.date   !== fDate)  return false;
+    if (fTime    && e._slot  !== fTime)  return false;
+    if (fType    && e.type   !== fType)  return false;
+    if (fTrack   && e.track  !== fTrack) return false;
+    if (fProgram === 'yes' && !e.program_found) return false;
+    if (fProgram === 'no'  &&  e.program_found) return false;
+    return true;
   });
+
+  // Keyword mode
+  if (searchMode === 'keyword' || !queryEmbedding || !searchEmbeddings) {
+    if (!search) return pool;
+    return pool.filter(e => {
+      const hay = `${e.title} ${e.organizers||''} ${e.summary||''} ${e.program_text||''}`.toLowerCase();
+      return hay.includes(search);
+    });
+  }
+
+  // Semantic mode
+  if (searchMode === 'semantic') {
+    const scored = pool
+      .map(e => ({ e, score: cosineSim(queryEmbedding, searchEmbeddings.get(e.id) || new Float32Array()) }))
+      .sort((a, b) => b.score - a.score);
+    const threshold = scored.length ? Math.max(0.50, scored[0].score * 0.70) : 0;
+    return scored.filter(({ score }) => score >= threshold).map(({ e }) => e);
+  }
+
+  // Smart mode: RRF over keyword + semantic candidates
+  const k = 60;
+  const rrfScores = new Map();
+
+  // Keyword candidates ranked by title-first priority
+  const keywordPool = search
+    ? pool.filter(e => `${e.title} ${e.organizers||''} ${e.summary||''} ${e.program_text||''}`.toLowerCase().includes(search))
+    : pool;
+  const keywordRanked = [...keywordPool].sort((a, b) =>
+    (b.title.toLowerCase().includes(search) ? 1 : 0) - (a.title.toLowerCase().includes(search) ? 1 : 0)
+  );
+  keywordRanked.forEach((e, i) => rrfScores.set(e.id, (rrfScores.get(e.id) || 0) + 1 / (k + i + 1)));
+
+  // Semantic candidates ranked by cosine similarity, threshold-filtered
+  const semScored = pool
+    .map(e => ({ e, score: cosineSim(queryEmbedding, searchEmbeddings.get(e.id) || new Float32Array()) }))
+    .sort((a, b) => b.score - a.score);
+  const semThreshold = semScored.length ? Math.max(0.50, semScored[0].score * 0.70) : 0;
+  const semRanked = semScored.filter(({ score }) => score >= semThreshold).map(({ e }) => e);
+  semRanked.forEach((e, i) => rrfScores.set(e.id, (rrfScores.get(e.id) || 0) + 1 / (k + i + 1)));
+
+  // Union of both candidate sets, sorted by RRF score
+  const candidateIds = new Set([...keywordRanked.map(e => e.id), ...semRanked.map(e => e.id)]);
+  return pool
+    .filter(e => candidateIds.has(e.id))
+    .sort((a, b) => (rrfScores.get(b.id) || 0) - (rrfScores.get(a.id) || 0));
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1092,6 +1195,7 @@ return;
   const el = document.getElementById(id);
   el.value = '';
 });
+queryEmbedding = null;
 renderBrowse();
 return;
   }
@@ -1135,9 +1239,14 @@ return;
 });
 
 // Filter inputs → re-render
-['f-search','f-date','f-time','f-type','f-track','f-program'].forEach(id =>
+['f-date','f-time','f-type','f-track','f-program'].forEach(id =>
   document.getElementById(id).addEventListener('input', renderBrowse)
 );
+document.getElementById('f-search').addEventListener('input', e => {
+  if (searchMode !== 'keyword') triggerSemanticSearch(e.target.value.trim());
+  else renderBrowse();
+});
+document.getElementById('search-mode-select').addEventListener('change', e => setSearchMode(e.target.value));
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 function openModal(id) {
