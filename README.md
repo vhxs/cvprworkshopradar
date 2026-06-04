@@ -134,3 +134,7 @@ The pipeline goes from the official CVPR PDF program → static metadata extract
 Corrections, suggestions, and source links are welcome. The most useful contributions are precise reports tied to a specific workshop or tutorial, especially when they include an official page that verifies the update.
 
 This project gets better when people spot the small mistakes that automated pipelines tend to miss.
+
+## 🙏 Credits
+
+This is a fork of [Gabrysse/cvprworkshopradar](https://github.com/Gabrysse/cvprworkshopradar), the original CVPR Workshop Radar project. This fork adds semantic and smart search powered by [Ollama](https://ollama.com) and `nomic-embed-text`.
