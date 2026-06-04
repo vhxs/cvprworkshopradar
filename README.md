@@ -4,6 +4,8 @@
   <img src="assets/images/logo.png" alt="CVPR Workshop Radar logo" width="160">
 </p>
 
+> **This is a fork of [Gabrysse/cvprworkshopradar](https://github.com/Gabrysse/cvprworkshopradar).** The original project and the vast majority of this website were built by [@Gabrysse](https://github.com/Gabrysse). This fork adds semantic and smart search powered by [Ollama](https://ollama.com).
+
 **CVPR Workshop Radar** is an independent, searchable companion for exploring **CVPR 2026 workshops and tutorials**.
 
 CVPR has a massive workshop and tutorial program. Finding the right sessions should not feel like opening twenty tabs, cross-checking PDFs, and hoping you did not miss the one workshop that perfectly matches your research.
@@ -135,6 +137,3 @@ Corrections, suggestions, and source links are welcome. The most useful contribu
 
 This project gets better when people spot the small mistakes that automated pipelines tend to miss.
 
-## 🙏 Credits
-
-This is a fork of [Gabrysse/cvprworkshopradar](https://github.com/Gabrysse/cvprworkshopradar), the original CVPR Workshop Radar project. This fork adds semantic and smart search powered by [Ollama](https://ollama.com) and `nomic-embed-text`.
